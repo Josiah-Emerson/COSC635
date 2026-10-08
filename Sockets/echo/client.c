@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 int main(int argc, char* argv[]){
    if(argc < 3){
@@ -38,20 +39,39 @@ int main(int argc, char* argv[]){
    for(ai = addrs_info; ai != NULL; ai = ai->ai_next){
       if((ai->ai_family != AF_INET) || (ai->ai_socktype != SOCK_STREAM)) continue;
 
-      if(connect(sockfd, ai->ai_addr, ai->ai_addrlen) == 0) break;
+      // servaddr.sin_addr = ((struct sockaddr_in*)(&ai->ai_addr))->sin_addr;
+      servaddr.sin_addr = ((struct sockaddr_in*)ai->ai_addr)->sin_addr;
+      if(connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) == 0) break;
 
-      perror("Connection error: ");
+      perror("Connection error");
    }
 
    if(!ai){
       fprintf(stderr, "ERROR: Could not connect\n");
       exit(0);
    }
+
    freeaddrinfo(addrs_info);
    addrs_info = NULL;
 
+   struct sockaddr_in addr_check;
+   socklen_t addr_check_len = sizeof(addr_check);
+   memset(&addr_check, 0, sizeof(addr_check));
+
+   if(getsockname(sockfd, (struct sockaddr*)&addr_check, &addr_check_len) == 0){
+      printf("Our addres: %s:%d\n",
+            inet_ntoa(addr_check.sin_addr),
+            ntohs(addr_check.sin_port));
+   }
+
+   if(getpeername(sockfd, (struct sockaddr*)&addr_check, &addr_check_len) == 0){ // NOTE: probably not safe to reuse addr_check but oh well
+      printf("Peer addres: %s:%d\n",
+            inet_ntoa(addr_check.sin_addr),
+            ntohs(addr_check.sin_port));
+   }
+
    char buffer[] = "Hello, World!\n";
-   ssize_t sent = send(sockfd, buffer, sizeof(buffer), 0);
+   ssize_t sent = write(sockfd, buffer, sizeof(buffer));
    if(sent < 0){
       fprintf(stderr, "ERROR: Failure in send\n");
    }else{

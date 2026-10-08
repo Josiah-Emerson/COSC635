@@ -1,5 +1,6 @@
 // Echo server. Listens for messages, and sends reply back to where it came from
 // Requires port to listen on 
+#include <asm-generic/ioctls.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +36,7 @@ int main(int argc, char* argv[]){
       exit(0);
    }
 
-   res = listen(sockfd, 0);
+   res = listen(sockfd, 10);
    if(res != 0){
       fprintf(stderr, "ERROR: Could not listen\n");
       exit(0);
@@ -76,19 +77,25 @@ int main(int argc, char* argv[]){
    socklen_t clientaddrsize = sizeof(clientaddr);
    memset(&clientaddr, 0, sizeof(clientaddr));
 
+   printf("Accepting\n");
+   fflush(stdout);
    int clientsockfd = accept(sockfd, (struct sockaddr*)&clientaddr, &clientaddrsize);
+   printf("After accept\n");
+   fflush(stdout);
    if(clientsockfd == -1){
       fprintf(stderr, "ERROR: Could not accept\n");
       exit(0);
    }
    int bufSize;
-   res = ioctl(clientsockfd, SIOCINQ, &bufSize);
+   res = ioctl(clientsockfd, FIONREAD, &bufSize);
    const int BUF_READ_SIZE = 255;
    char buf[255];
    printf("Reading data: \n");
+   fflush(stdout);
    while(bufSize > 0){
       ssize_t sz = recv(clientsockfd, &buf, BUF_READ_SIZE, 0);
       printf("%s", buf);
+      fflush(stdout);
       bufSize -= sz;
    }
 }
