@@ -34,6 +34,7 @@ int main(int argc, char* argv[]){
       exit(0);
    }
 
+   /*
    // try to connect to each possible?
    struct addrinfo* ai = NULL;
    for(ai = addrs_info; ai != NULL; ai = ai->ai_next){
@@ -53,19 +54,32 @@ int main(int argc, char* argv[]){
 
    freeaddrinfo(addrs_info);
    addrs_info = NULL;
+   */
+
+   if(inet_pton(AF_INET, addr, &servaddr.sin_addr) != 1){
+      perror("ERROR inet_pton");
+      exit(0);
+   }
+
+   printf("Connecting...\n");
+   if(connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0){
+      perror("ERROR connecting");
+      exit(0);
+   }
+   printf("Done connecting\n");
 
    struct sockaddr_in addr_check;
    socklen_t addr_check_len = sizeof(addr_check);
    memset(&addr_check, 0, sizeof(addr_check));
 
    if(getsockname(sockfd, (struct sockaddr*)&addr_check, &addr_check_len) == 0){
-      printf("Our addres: %s:%d\n",
+      printf("Our address: %s:%d\n",
             inet_ntoa(addr_check.sin_addr),
             ntohs(addr_check.sin_port));
    }
 
    if(getpeername(sockfd, (struct sockaddr*)&addr_check, &addr_check_len) == 0){ // NOTE: probably not safe to reuse addr_check but oh well
-      printf("Peer addres: %s:%d\n",
+      printf("Peer address: %s:%d\n",
             inet_ntoa(addr_check.sin_addr),
             ntohs(addr_check.sin_port));
    }
