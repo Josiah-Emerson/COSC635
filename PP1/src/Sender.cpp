@@ -18,6 +18,7 @@ struct HumanReadable{
        }
 };
 
+// TODO: Ensure we accept necessary bits from command line arg
 int main(int argc, char* argv[]){
    std::filesystem::path path { "./resources/example.txt" };
    if(!std::filesystem::exists(path)){
