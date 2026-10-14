@@ -1,4 +1,5 @@
 #include "PP1_UDPFileReceiver.h"
+#include "Defs.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -53,5 +54,23 @@ void PP1_UDPFileReceiver::printDestination(){
 
          printf("%s:%d\n", hbuf, m_portno);
       }
+   }
+}
+
+FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
+   // block and wait
+   while(1){
+      char buf[MAX_PDU_SIZE];
+      // TODO: Do we care about srcaddr? I think not since we can use transaction ID
+      ssize_t sz = recvfrom(m_UDPSocketFD, buf, sizeof(buf), 0, NULL, NULL);
+      if(sz < 0){
+         // TODO handle
+         // TODO: return FAIL
+         printf("ERROR: Could not recvfrom\n");
+         exit(0);
+      }
+
+      printf("PDU Received of size %ld\n", sz);
+      return FileReceiveStatus::SUCCESS;
    }
 }

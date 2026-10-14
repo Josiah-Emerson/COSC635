@@ -9,4 +9,5 @@ int main(){
    std::cout << "Receiver successfully created\n";
 
    receiver.printDestination();
+   receiver.receiveFile(nullptr);
 }

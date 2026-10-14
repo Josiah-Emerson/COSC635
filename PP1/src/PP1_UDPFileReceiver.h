@@ -1,4 +1,5 @@
 #pragma once
+#include <filesystem>
 #include <netinet/in.h>
 
 /*
@@ -7,6 +8,13 @@
  *
  */
 
+// TODO: Any other statuses? 
+// For now I can only think of these too
+enum class FileReceiveStatus{
+   SUCCESS,
+   FAIL,
+};
+
 class PP1_UDPFileReceiver{
    public:
       PP1_UDPFileReceiver(int portno);
@@ -14,6 +22,14 @@ class PP1_UDPFileReceiver{
 
       // Print the valid destination addresses and ports
       void printDestination();
+
+      // NOTE: This function blocks
+      // It waits for a START datagram 
+      // then attempts to build the file as datagrams flow in 
+      // If the return value is SUCCESS, path will contain the path to where that file is
+      // If the return value is not a SUCCESS, path will be a nullptr 
+      // TODO: May have path point to the path anyways if we want to be able to view part of it
+      FileReceiveStatus receiveFile(std::filesystem::path* path);
 
    private:
       int m_portno; // NOTE: Stored in host order not network order (i.e. convert when using for network stuff)

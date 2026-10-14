@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <iostream>
 #include "PDU.h"
+#include "PP1_UDPFileSender.h"
 
 struct HumanReadable{
    std::uintmax_t size {};
@@ -26,7 +27,13 @@ int main(int argc, char* argv[]){
       return 1;
    }
 
+   // TODO: accept command args 
+   std::string addr { "127.0.0.1" };
+   int port { 8080 };
+
    std::cout << "size: " << HumanReadable{std::filesystem::file_size(path)} << '\n';
    std::cout << "Filename: " << path.stem() << '\n';
    std::cout << "Extension: " << path.extension() << '\n';
+
+   PP1_UDPFileSender sender { addr.c_str(), port, path};
 }

@@ -24,6 +24,9 @@ add_executable(PP1_UDPFileReceiver
 target_link_libraries(PP1_UDPFileReceiver PRIVATE common)
 # target_link_libraries(PP1_UDPFileReceiver PRIVATE hello)
 
-add_executable(PP1_UDPFileSender src/Sender.cpp)
+add_executable(PP1_UDPFileSender 
+   src/Sender.cpp
+   src/PP1_UDPFileSender.cpp
+)
 target_link_libraries(PP1_UDPFileSender PRIVATE common)
 # target_link_libraries(PP1_UDPFileSender PRIVATE hello)
