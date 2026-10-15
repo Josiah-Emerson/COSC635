@@ -15,6 +15,8 @@ class PP1_UDPFileSender{
       // portno is the port on that interface
       // path is a path to the file to be sent
       // The constructor validates the file, and creates hte UDP socket and dest addr
+      // creates START datagram ready to be transmitted
+      // generates transfer ID
       PP1_UDPFileSender(const char* address, int portno, const std::filesystem::path& path);
       ~PP1_UDPFileSender();
 
@@ -22,14 +24,15 @@ class PP1_UDPFileSender{
       void sendFile();
 
    private: 
-      // [PDU HEADER][PDU_START_HEADER][PAYLOAD]
-      //  16                20            N
-      // Creates PDU_START_Header based on the file specified in m_path
-      PDU_START_Header createSTARTHeader();
+      Conv_PDU_Header getConvHeader(Msg_Type msg_type, std::uint64_t seq_num, std::uint16_t payload_len);
    private:
       int m_UDPSocketFD;
       int m_portno; // NOTE: Stored in host format not network
       sockaddr_in m_dest_addr;
+
+      char* m_START_PDU = nullptr;
+      std::size_t m_START_PDU_len = 0;
+      std::uint32_t m_transferID;
 
       std::filesystem::path m_path;
 };

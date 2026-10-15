@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
-#include "PDU.h"
 #include "PP1_UDPFileSender.h"
 
 struct HumanReadable{
@@ -26,7 +25,6 @@ int main(int argc, char* argv[]){
       std::cout << "Does not exist\n";
       return 1;
    }
-
    // TODO: accept command args 
    std::string addr { "127.0.0.1" };
    int port { 8080 };
@@ -36,4 +34,5 @@ int main(int argc, char* argv[]){
    std::cout << "Extension: " << path.extension() << '\n';
 
    PP1_UDPFileSender sender { addr.c_str(), port, path};
+   sender.sendFile();
 }

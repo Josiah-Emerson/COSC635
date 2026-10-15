@@ -26,6 +26,23 @@ struct PDU_START_Header{
    std::uint8_t extension_size;        // size of the extension name
 };
 
+// Convenience structs for the headers
+struct Conv_PDU_Header{
+   int           version; // NOTE: Must be between 0 and 63
+   Msg_Type      type;
+   std::uint32_t transferID; // NOTE: the 8 most significant bits don't really matter here since the field is 24 bits
+   std::uint64_t sequence_num;
+   std::uint16_t payload_len;
+   std::uint16_t reserved;
+};
+
+struct Conv_PDU_START_Header{
+   std::uintmax_t fileSize; // NOTE: The actual field can store larger values
+   std::uint64_t  tot_DATA_PDU_Cnt;
+   std::uint8_t   filename_size;
+   std::uint8_t   extension_size;
+};
+
 static_assert(sizeof(PDU_START_Header) == 20, "PDU_START_Header size is not what it should be");
 
 // Helper funcs
@@ -37,6 +54,12 @@ void U64ToBytes(std::uint64_t num, std::uint8_t* bytes);
 // returns the value stored in bytes as a uint64
 std::uint64_t bytesToU64(const std::uint8_t* bytes);
 
+Conv_PDU_Header PDUHtoConv(PDU_Header header);
+PDU_Header ConvToPDUH(Conv_PDU_Header header);
+
+Conv_PDU_START_Header PDUSTARTtoConv(PDU_START_Header header);
+PDU_START_Header ConvToPDUSTART(Conv_PDU_START_Header header);
+
 // Header Encoding Functions
 // returns the std::uint8_t corresponding to the type_version field of PDU_Header
 // version must be between 0 and 63
@@ -44,7 +67,11 @@ std::uint8_t encodeTypeVersionField(int version, Msg_Type msgType);
 
 // Expects a pointer to an array of 3 bytes to put the transfer ID in 
 // The tranfer ID is currently a randomly generated 24 bit value
+// Used for initial ID creation
 void createTransferID(std::uint8_t* t_idField);
+
+// Used for assignment of an ID to a field
+void encodeTransferID(std::uint32_t ID, std::uint8_t* t_idField);
 
 // encodes the value num into the seqNum field. 
 // seqNumField should be apointer to an array of 8 std::uint8_t 
@@ -54,9 +81,11 @@ void encodeSequenceNumber(std::uint64_t num, std::uint8_t* seqNumField);
 // fileSizeField is a pointer to the first element of an array of 10 std::uint8_t 
 void encodeFileSize(std::uintmax_t fileSize, std::uint8_t* fileSizeField);
 
-// filesize is filesize in bytes
+// calculates number of DATAPDUs needed for the file size
+std::uint64_t calculateDATAPDUCnt(std::uintmax_t filesize);
+
 // pduCntField is a pointer to the tot_DATA_PDU_Cnt field and expected to be an array of 8 std::uint8_t
-void encodeDATAPDUCnt(std::uintmax_t filesize, std::uint8_t* pduCntField);
+void encodeDATAPDUCnt(std::uint64_t DATAPDUcnt, std::uint8_t* pduCntField);
 
 // Header Decoding Functions 
 
@@ -78,4 +107,4 @@ std::uint64_t decodeSequenceNum(std::uint8_t* seq_field);
 // Expects fileSizeField to be a pointer to 10 contiguous std::uint8_t
 std::uintmax_t decodeFileSize(std::uint8_t* fileSizeField);
 
-std::uint64_t decodeDATAPDUCnt();
+std::uint64_t decodeDATAPDUCnt(std::uint8_t* DATAPDUCntField);

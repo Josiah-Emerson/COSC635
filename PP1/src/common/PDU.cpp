@@ -1,6 +1,58 @@
 #include "PDU.h"
 #include <cassert>
+#include <cstring>
 #include <random>
+
+Conv_PDU_Header PDUHtoConv(PDU_Header header){
+   Conv_PDU_Header res;
+   memset(&res, 0, sizeof(res));
+
+   res.version = decodeVersion(header.type_version);
+   res.type = decodeMsgType(header.type_version);
+   res.transferID = decodeTransferID(&header.transfer_id[0]);
+   res.sequence_num = decodeSequenceNum(&header.sequence_num[0]);
+   res.payload_len = header.payload_len;
+   res.reserved = header.reserved;
+
+   return res;
+}
+
+PDU_Header ConvToPDUH(Conv_PDU_Header header){
+   PDU_Header res;
+   memset(&res, 0, sizeof(res));
+
+   res.type_version = encodeTypeVersionField(header.version, header.type);
+   encodeTransferID(header.transferID, &res.transfer_id[0]);
+   encodeSequenceNumber(header.sequence_num, &res.sequence_num[0]);
+   res.payload_len = header.payload_len;
+   res.reserved = header.reserved;
+
+   return res;
+}
+
+Conv_PDU_START_Header PDUSTARTtoConv(PDU_START_Header header){
+   Conv_PDU_START_Header res;
+   memset(&res, 0, sizeof(res));
+
+   res.fileSize = decodeFileSize(header.fileSize_Bytes);
+   res.tot_DATA_PDU_Cnt = decodeDATAPDUCnt(header.tot_DATA_PDU_Cnt);
+   res.filename_size = header.filename_size;
+   res.extension_size = header.extension_size;
+
+   return res;
+}
+
+PDU_START_Header ConvToPDUSTART(Conv_PDU_START_Header header){
+   PDU_START_Header res;
+   memset(&res, 0, sizeof(res));
+
+   encodeFileSize(header.fileSize, res.fileSize_Bytes);
+   encodeDATAPDUCnt(header.tot_DATA_PDU_Cnt, res.tot_DATA_PDU_Cnt);
+   res.filename_size = header.filename_size;
+   res.extension_size = header.extension_size;
+
+   return res;
+}
 
 void U64ToBytes(std::uint64_t num, std::uint8_t* bytes){
    // bytes: 0 1 2 3 4 5 6 7
@@ -61,6 +113,15 @@ void createTransferID(std::uint8_t* t_idField){
    }
 }
 
+void encodeTransferID(std::uint32_t ID, std::uint8_t *t_idField){
+   // NOTE: We are assuming that first 8 bits of the u32 are 0 and do not matter since we only store 24 bits
+   int offset = 16;
+   for(std::size_t i { 0 }; i < 3; ++i){
+      t_idField[i] = static_cast<std::uint8_t>(ID >> offset);
+      offset -= 8;
+   }
+}
+
 void encodeSequenceNumber(std::uint64_t num, std::uint8_t* seqNumField){
    U64ToBytes(num, seqNumField);
 }
@@ -78,6 +139,18 @@ void encodeFileSize(std::uintmax_t filesize, std::uint8_t* fileSizeField){
          static_cast<std::uint8_t>(filesize >> offset);
       offset -= 8;
    }
+}
+
+std::uint64_t calculateDATAPDUCnt(std::uintmax_t filesize){
+   // TODO: change magic num?
+   std::uint64_t numDATAPDU = filesize / 1024;
+   if((filesize % 1024) != 0) ++numDATAPDU; // incremenet if there is any remainder
+
+   return numDATAPDU;
+}
+
+void encodeDATAPDUCnt(std::uint64_t DATAPDUCnt, std::uint8_t *pduCntField){
+   U64ToBytes(DATAPDUCnt, pduCntField);
 }
 
 // Header Decoding Functions
@@ -133,4 +206,8 @@ std::uintmax_t decodeFileSize(std::uint8_t* fileSizeField){
    }
 
    return val;
+}
+
+std::uint64_t decodeDATAPDUCnt(std::uint8_t* DATAPDUCntField){
+   return bytesToU64(DATAPDUCntField);
 }
