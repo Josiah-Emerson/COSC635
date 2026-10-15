@@ -2,6 +2,28 @@
 #include <cassert>
 #include <random>
 
+void U64ToBytes(std::uint64_t num, std::uint8_t* bytes){
+   // bytes: 0 1 2 3 4 5 6 7
+
+   int offset = 56; // beginning bit offset into val
+   for(std::size_t i { 0 }; i < 8; ++i){
+      bytes[i] = static_cast<std::uint8_t>(num >> offset);
+      offset -= 8;
+   }
+}
+
+std::uint64_t bytesToU64(const std::uint8_t* bytes){
+   int offset = 56;
+   std::uint64_t val { 0 };
+
+   for(std::size_t i { 0 }; i < 8; ++i){
+      val = val | (static_cast<std::uint64_t>(bytes[i]) << offset);
+      offset -= 8;
+   }
+
+   return val;
+}
+
 // Header Encoding Functions
 std::uint8_t encodeTypeVersionField(int version, Msg_Type msgType){
    assert(version < 64 && version >= 0 && "Invalid version number. Must be in range 0-63");
@@ -40,12 +62,20 @@ void createTransferID(std::uint8_t* t_idField){
 }
 
 void encodeSequenceNumber(std::uint64_t num, std::uint8_t* seqNumField){
-   // bytes: 0 1 2 3 4 5 6 7
-   // as laid out in the seq number field
+   U64ToBytes(num, seqNumField);
+}
 
-   int offset = 56; // Beginning bit offset into num
-   for(std::size_t i { 0 }; i < 8; ++i){
-      seqNumField[i] = static_cast<std::uint8_t>(num >> offset);
+void encodeFileSize(std::uintmax_t filesize, std::uint8_t* fileSizeField){
+   // NOTE: I think the on my machine std::uintmax_t is not big enough for this 
+   // bytes: 0 1 2 3 4 5 6 7 8 9
+   // 64bit: X X 0 1 2 3 4 5 6 7
+   // while our offset is larger than NUM_BITS that byte is equal to 0?
+
+   constexpr int NUM_BITS = sizeof(filesize) * 8; // Needed since the num of bytes in file size field is larger than std::uintmax_t
+   int offset = 72;
+   for(std::size_t i { 0 }; i < 10; ++i){
+      fileSizeField[i] = offset >= NUM_BITS ? 0 : 
+         static_cast<std::uint8_t>(filesize >> offset);
       offset -= 8;
    }
 }
@@ -83,11 +113,22 @@ std::uint32_t decodeTransferID(std::uint8_t* t_idField){
 }
 
 std::uint64_t decodeSequenceNum(std::uint8_t* seq_field){
-   int offset = 56;
-   std::uint64_t val { 0 };
+   return bytesToU64(seq_field);
+}
 
-   for(std::size_t i { 0 }; i < 8; ++i){
-      val = val | (static_cast<std::uint64_t>(seq_field[i]) << offset);
+std::uintmax_t decodeFileSize(std::uint8_t* fileSizeField){
+   constexpr int NUM_BITS = sizeof(std::uintmax_t) * 8;
+   int offset = 72;
+   std::uintmax_t val { 0 };
+
+   for(std::size_t i { 0 }; i < 10; ++i){
+      if(offset >= NUM_BITS){
+         // TODO: More here for testing
+         assert(fileSizeField[i] == 0 && "Expected this byte to be 0 but it is not");
+      }else{
+         val = val | (static_cast<std::uintmax_t>(fileSizeField[i]) << offset);
+      }
+
       offset -= 8;
    }
 

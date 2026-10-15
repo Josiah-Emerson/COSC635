@@ -1,5 +1,6 @@
 #include "PP1_UDPFileReceiver.h"
 #include "Defs.h"
+#include "PDU.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -70,7 +71,23 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
          exit(0);
       }
 
-      printf("PDU Received of size %ld\n", sz);
+      if(sz < sizeof(PDU_Header)){
+         printf("ERROR: Too few bytes read\n");
+         exit(0);
+      }
+      std::size_t currIdx { 0 };
+      PDU_Header header;
+      memcpy(&header, &buf[currIdx], sizeof(PDU_Header));
+      currIdx += sizeof(PDU_Header);
+
+      printf("The PDU has the following header values:\n");
+      printf("Header version #%d, and is a %s PDU\n", decodeVersion(header.type_version), 
+            decodeMsgType(header.type_version) == Msg_Type::START ? "START" : 
+            decodeMsgType(header.type_version) == Msg_Type::DATA ? "DATA" : 
+            decodeMsgType(header.type_version) == Msg_Type::END ? "END" : "UNKNOWN");
+      printf("Transfer id: %d\n", decodeTransferID(&header.transfer_id[0]));
+      printf("Seq #%ld with %d valid bytes\n", decodeSequenceNum(&header.sequence_num[0]), header.payload_len);
+
       return FileReceiveStatus::SUCCESS;
    }
 }
