@@ -101,10 +101,25 @@ void PP1_UDPFileSender::sendFile(){
    Conv_PDU_Header conv_header = getConvHeader(Msg_Type::DATA, 1, 0);
    char buf[sizeof(PDU_Header) + MAX_PAYLOAD_SIZE];
    memset(buf, 0, sizeof(buf));
+
+   // TODO: used for delay sim
+   char *delayBuf; // Free dynamically if we use this
+   std::size_t dBufsize; // 
+
    while(istrm.read(&buf[sizeof(PDU_Header)], MAX_PAYLOAD_SIZE) || istrm.gcount() > 0){
       conv_header.payload_len = istrm.gcount(); 
       PDU_Header data_header = ConvToPDUH(conv_header);
       memcpy(buf, &data_header, sizeof(data_header));
+      // TODO: Below simulates an out of order packet
+      // NOTE: we know we have 129, so lets delay packet 127 until after. 
+      // This should mean that 128, 129 get queued and then 127 gets written followed by 128 and 129
+      if(conv_header.sequence_num == 127){
+         dBufsize = sizeof(data_header) + data_header.payload_len;
+         char* tmpBuf = new char[dBufsize];
+         memcpy(tmpBuf, buf, dBufsize);
+         delayBuf = tmpBuf;
+         continue;
+      }
       sent = sendto(m_UDPSocketFD, buf, sizeof(data_header) + data_header.payload_len, 0, (sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
       if(sent < 0){
          // TODO: Handle
@@ -114,11 +129,15 @@ void PP1_UDPFileSender::sendFile(){
 
       ++conv_header.sequence_num;
    }
+   // TODO: out of order below
+   sendto(m_UDPSocketFD, delayBuf, dBufsize, 0, (sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
+   delete[] delayBuf;
    printf("Sent %ld DATA packets\n", conv_header.sequence_num - 1);
 
    // send END packet
    // TODO: should seq num be 0 or keep it in order from DATA packets
    conv_header.type = Msg_Type::END;
+   conv_header.payload_len = 0;
    PDU_Header end_header = ConvToPDUH(conv_header);
    sent = sendto(m_UDPSocketFD, &end_header, sizeof(end_header), 0, (sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
    if(sent < 0){

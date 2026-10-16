@@ -1,6 +1,4 @@
-CURRENT: Left some notes in the receive file func, but need to figure out the best way for the ingress of 
-data to flow. See all the validation that needs to happen, as well as the tracking of stats. NOTE: have not 
-added much for the END portion
+CURRENT: Works fine for in order. Working on out of order. Sender stops at 127 and it should be queued properly but its not quite working
 
 
 TODO: Possible implementation could depend on versions. One version TransferID is just an ID and in another 

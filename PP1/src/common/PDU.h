@@ -1,5 +1,19 @@
 #pragma once
 #include <cstdint>
+#include <set>
+#include <string>
+
+// Supported versions
+// NOTE: must be a number 0-63
+static const std::set<int> SUPPORTED_VERSIONS = {
+   1
+};
+
+// Supported file types
+// TODO: Flag to turn this check off?
+static const std::set<std::string> SUPPORTED_FILE_TYPES = {
+   ".txt"
+};
 
 // Types
 enum class Msg_Type{
@@ -26,6 +40,8 @@ struct PDU_START_Header{
    std::uint8_t extension_size;        // size of the extension name
 };
 
+static_assert(sizeof(PDU_START_Header) == 20, "PDU_START_Header size is not what it should be");
+
 // Convenience structs for the headers
 struct Conv_PDU_Header{
    int           version; // NOTE: Must be between 0 and 63
@@ -42,8 +58,6 @@ struct Conv_PDU_START_Header{
    std::uint8_t   filename_size;
    std::uint8_t   extension_size;
 };
-
-static_assert(sizeof(PDU_START_Header) == 20, "PDU_START_Header size is not what it should be");
 
 // Helper funcs
 

@@ -1,9 +1,12 @@
 #include "PP1_UDPFileReceiver.h"
 #include "Defs.h"
 #include "PDU.h"
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <ifaddrs.h>
@@ -29,6 +32,10 @@ PP1_UDPFileReceiver::PP1_UDPFileReceiver(int portno)
 
 // TODO: Actually implement destructor
 PP1_UDPFileReceiver::~PP1_UDPFileReceiver(){
+   if(m_currentTransfer){
+      delete m_currentTransfer;
+      m_currentTransfer = nullptr;
+   }
 }
 
 void PP1_UDPFileReceiver::printDestination(){
@@ -59,6 +66,7 @@ void PP1_UDPFileReceiver::printDestination(){
 }
 
 FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
+   // TODO: add timeout
    // block and wait for incoming files
    int numPackets = 0;
    while(1){
@@ -79,85 +87,221 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
 
       std::size_t currIdx { 0 };
       PDU_Header header;
-      memcpy(&header, &buf[currIdx], sizeof(PDU_Header));
-      currIdx += sizeof(PDU_Header);
+      memcpy(&header, &buf[currIdx], sizeof(header));
+      currIdx += sizeof(header);
 
       Conv_PDU_Header conv_header = PDUHtoConv(header);
+      if(validatePDU(conv_header, sz) != PDU_ValidationState::VALID){
+         // TODO: handle
+         printf("ERROR: Invalid PDU state\n");
+         exit(0);
+      }
       switch(conv_header.type){
          case(Msg_Type::START):
-            // Validate information about the 'requested' transfer
-            // version is supported ?
-            // extension is suppoorted ? 
-            break;
+            {
+               PDU_START_Header start_header;
+               memcpy(&start_header, &buf[currIdx], sizeof(start_header));
+               currIdx += sizeof(start_header);
+
+               Conv_PDU_START_Header conv_start_header = PDUSTARTtoConv(start_header);
+               char filename[start_header.filename_size + 1];
+               char extension[start_header.extension_size + 1];
+               memcpy(filename, buf + currIdx, start_header.filename_size);
+               currIdx += start_header.filename_size;
+               memcpy(extension, buf + currIdx, start_header.extension_size);
+               currIdx += start_header.extension_size;
+
+               if(validateStartPDU(conv_start_header, std::string{extension}) != StartHeaderValidationState::VALID){
+                  // TODO: handle
+                  printf("ERROR: Invalid START PDU \n");
+                  exit(0);
+               }
+
+               // Valid: dynamically allocate and store metadata
+               m_currentTransfer = new CurrentTransferMetadata{
+                  .version = conv_header.version,
+                  .transferID = conv_header.transferID,
+                  .expectedDATAPDUs = conv_start_header.tot_DATA_PDU_Cnt,
+                  .expectedFilesize = conv_start_header.fileSize,
+                  .filename = filename,
+                  .extension = extension,
+               };
+
+               // TODO: How we handle errors determines where the byte count increase goes
+               m_stats.totalBytes        += sz;
+               m_stats.totalPayloadBytes += conv_header.payload_len;
+
+               // Open file for writing by DATA branch
+               std::string tmpFile = m_currentTransfer->filename + ".part";
+               m_ofstrm = std::ofstream(tmpFile, std::ios::binary);
+
+               if(!m_ofstrm){
+                  // TODO: Handle
+                  printf("ERROR: could not open file for writing\n");
+                  exit(0);
+               }
+               break;
+            }
          case(Msg_Type::DATA):
-            // Validate tID, version, seqnum
-            // Have we received START? If not drop packet
-            // same version ?
-            // same tID ? 
-            // seqnum is within range expected ?
-            // seqnum alr received ?
-            // payload len is within correct size ?
-            break;
+            {
+               if(!m_currentTransfer){ // No valid START has been received
+                  // TODO: Update this so that instead of erring out we just discard it and notify
+                  printf("ERROR: [DATA] PDU received, but no valid [START] PDU has been received");
+                  exit(0);
+               }
+
+               if(validateDataPDU(conv_header) != Data_ValidationState::VALID){
+                  // TODO: handle
+                  // TODO: we can drop repeat seq nums 
+                  printf("ERROR: Invalid [DATA] PDU\n");
+                  exit(0);
+               }
+
+               // TODO: How we handle errors determines where the byte count increase goes
+               m_stats.totalBytes        += sz;
+               m_stats.totalDATABytes    += conv_header.payload_len;
+               m_stats.totalPayloadBytes += conv_header.payload_len;
+
+               // We have a valid DATA PDU
+               // Queue for write and mark as received
+               queueForWrite(buf + currIdx, conv_header.payload_len, conv_header.sequence_num);
+               currIdx += conv_header.payload_len;
+               m_currentTransfer->receivedDATAPDUs.insert(conv_header.sequence_num);
+               break;
+            }
          case(Msg_Type::END):
-            break;
+            {
+               if(!m_currentTransfer){
+                  // TODO: Handle
+                  printf("ERROR: [END] PDU received, but no valid [START] PDU has been received");
+                  exit(0);
+               }
+
+               if(validateEndPDU(conv_header) != End_ValidationState::VALID){
+                     // TODO: handle
+                     // TODO: we can drop repeat seq nums 
+                     printf("ERROR: Invalid [END] PDU\n");
+                     exit(0);
+               }
+
+               // TODO: How we handle errors determines where the byte count increase goes
+               m_stats.totalBytes        += sz;
+               m_stats.totalPayloadBytes += conv_header.payload_len; // TODO/NOTE: There probably should be a check that [END] has no payload
+
+               printf("Wrote %ld of %ld expected DATA PDUs\n", m_currentTransfer->writtenDATAPDUs.size(), m_currentTransfer->expectedDATAPDUs);
+               printf("Received %ldB total (including all headers), %ldB of payloads (includes [START] header) and %ldB of %ldB expected\n",
+                     m_stats.totalBytes, m_stats.totalPayloadBytes, m_stats.totalDATABytes, m_currentTransfer->expectedFilesize);
+
+               // TODO: Don't just assume file is done
+               m_ofstrm.close();
+               std::string tmpFile = m_currentTransfer->filename + ".part";
+               std::string finalFile = m_currentTransfer->filename + m_currentTransfer->extension;
+               std::filesystem::rename(tmpFile, finalFile);
+               printf("Your file is accessible at %s\n", finalFile.c_str());
+
+               break;
+
+            }
          default: 
             // TODO: Handle
             printf("ERROR: Unhandled or Unknown message type\n");
             exit(0);
       }
-
-      // We have some PDU 
-      // First we validate the header
-      // If we are yet to receive a START datagram then this must be a START one 
-      // If we have received a START, then: check if DATA or END
-      // If DATA: work on reconstruction
-      // If END: check if we are in a valid end state or need to timeout
-      
-      // For a DATA we need to validate: 
-      // 1. version is the same (?)
-      // 2. transfer_id 
-      // 3. expected payloads (i.e. both number and which ones we have received)
-      // 4. total number of bytes received
    }
 }
 
-/*
-FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
-   // block and wait
-   while(1){
+PP1_UDPFileReceiver::PDU_ValidationState PP1_UDPFileReceiver::validatePDU(const Conv_PDU_Header& header, ssize_t size){
+   // TODO: Add outputs for each of these failpoints? 
+   
+   if(!SUPPORTED_VERSIONS.count(header.version))
+      return PDU_ValidationState::UNSUPPORTED_VERSION;
 
+   if(size > MAX_PDU_SIZE)
+      return PDU_ValidationState::INVALID_PDU_SIZE;
 
-      printf("The PDU has the following header values:\n");
-      printf("Header version #%d, and is a %s PDU\n", decodeVersion(header.type_version), 
-            decodeMsgType(header.type_version) == Msg_Type::START ? "START" : 
-            decodeMsgType(header.type_version) == Msg_Type::DATA ? "DATA" : 
-            decodeMsgType(header.type_version) == Msg_Type::END ? "END" : "UNKNOWN");
-      printf("Transfer id: %d\n", decodeTransferID(&header.transfer_id[0]));
-      printf("Seq #%ld with %d valid bytes\n", decodeSequenceNum(&header.sequence_num[0]), header.payload_len);
+   if(header.payload_len > MAX_PDU_PAYLOAD_SIZE)
+      return PDU_ValidationState::INVALID_PAYLOAD_LEN;
 
-      // TODO: Branch here on what type of PDU is, but for now assume START
-      PDU_START_Header start_header;
-      memcpy(&start_header, &buf[currIdx], sizeof(PDU_START_Header));
-      currIdx += sizeof(PDU_START_Header);
+   if(header.payload_len != (size - sizeof(PDU_Header)))
+      return PDU_ValidationState::INVALID_PAYLOAD_LEN;
 
-      char filename[start_header.filename_size + 1];
-      char extension[start_header.filename_size + 1];
-      memcpy(&filename[0], &buf[currIdx], start_header.filename_size);
-      currIdx += start_header.filename_size;
-      memcpy(&extension[0], &buf[currIdx], start_header.extension_size);
-      currIdx += start_header.extension_size;
-
-      filename[start_header.filename_size] = '\0';
-      extension[start_header.extension_size] = '\0';
-
-      printf("The START Header values are:\n");
-      printf("Total file size: %ld\n", decodeFileSize(&start_header.fileSize_Bytes[0]));
-      printf("Total DATA PDU Count: %ld\n", decodeDATAPDUCnt(&start_header.tot_DATA_PDU_Cnt[0]));
-      printf("Filename size: %d\n", start_header.filename_size);
-      printf("extension size: %d\n", start_header.extension_size);
-      printf("File: %s%s\n", filename, extension);
-
-   }
-   return FileReceiveStatus::SUCCESS;
+   return PDU_ValidationState::VALID;
 }
-*/
+
+PP1_UDPFileReceiver::StartHeaderValidationState PP1_UDPFileReceiver::validateStartPDU(const Conv_PDU_START_Header& start_header, const std::string& extension){
+   // TODO: Figure this out
+   // NOTE: for now there is no max file size
+   if(!SUPPORTED_FILE_TYPES.count(extension))
+      return StartHeaderValidationState::UNSUPPORTED_FILE_TYPE;
+
+   return StartHeaderValidationState::VALID;
+}
+
+PP1_UDPFileReceiver::Data_ValidationState PP1_UDPFileReceiver::validateDataPDU(const Conv_PDU_Header& header){
+   // TODO: Output?
+   // NOTE: This function should only be called in one place, but just in case the caller doesn't check nullptr...
+   assert(m_currentTransfer && "Called validateDATAPDU without m_currentTransfer");
+
+   if(header.transferID != m_currentTransfer->transferID)
+      return Data_ValidationState::INVALID_T_ID;
+
+   if(header.sequence_num > m_currentTransfer->expectedDATAPDUs)
+      return Data_ValidationState::INVALID_SEQ_NUM;
+
+   if(m_currentTransfer->receivedDATAPDUs.count(header.sequence_num))
+      return Data_ValidationState::REPEAT_SEQ_NUM;
+
+   return Data_ValidationState::VALID;
+}
+
+PP1_UDPFileReceiver::End_ValidationState PP1_UDPFileReceiver::validateEndPDU(const Conv_PDU_Header& header){
+   // NOTE: This function should only be called in one place, but just in case the caller doesn't check nullptr...
+   assert(m_currentTransfer && "Called validateDATAPDU without m_currentTransfer");
+
+   if(header.transferID != m_currentTransfer->transferID) // [END] not for this transfer
+      return End_ValidationState::INVALID_T_ID;
+
+   return End_ValidationState::VALID;
+}
+
+void PP1_UDPFileReceiver::queueForWrite(const char* buf, std::size_t size, std::uint64_t seqNum){
+   // First expected SeqNum is 1
+   // TODO/NOTE: This function assumes we don't get repeat seqNum since the DATA branch should account for this,
+   // but would be good to add a check for that too eventually
+   static std::uint64_t expectedSeqNum { 1 };
+
+   if(seqNum == expectedSeqNum){
+      printf("Wrote %ld\n", seqNum);
+      m_ofstrm.write(buf, size);
+      m_currentTransfer->writtenDATAPDUs.insert(seqNum);
+      ++expectedSeqNum;
+
+      // Check queue
+      for(const auto& e : m_writeQueue){
+         printf("In loop for seq num: %ld\n", e.first);
+         // Should happen linearly. We should not be in a state where the first queued element 
+         // is lower than the expectedSeqNum
+         if(e.first != expectedSeqNum)
+            break;
+
+         if(e.first < expectedSeqNum){ // TODO: Remove this check
+            printf("ERROR: Got ourselves into a bad queue state\n");
+            exit(0);
+         }
+         printf("Received and wrote queued packet #%ld\n", e.first);
+         m_ofstrm.write(e.second.first, e.second.second);
+         m_currentTransfer->writtenDATAPDUs.insert(seqNum);
+         delete[] e.second.first; // free memory
+         m_writeQueue.erase(e.first);
+         ++expectedSeqNum;
+      }
+      return;
+   }
+
+   printf("Received [DATA] packet #%ld but expected %ld\n", seqNum, expectedSeqNum);
+
+   // Not ready for this packet yet; add to queue
+   char* tmpBuf = new char[size]; // dynamically allocate: need to make sure we delete it
+   m_writeQueue.insert({seqNum, {tmpBuf, size}});
+}
+
