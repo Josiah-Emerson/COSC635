@@ -83,9 +83,41 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
       currIdx += sizeof(PDU_Header);
 
       Conv_PDU_Header conv_header = PDUHtoConv(header);
-      printf("%d: [%s]\n", numPackets++, conv_header.type == Msg_Type::START ? 
-            "START" : conv_header.type == Msg_Type::DATA ? 
-            "DATA" : conv_header.type == Msg_Type::END ? "END" : "UNKNOWN");
+      switch(conv_header.type){
+         case(Msg_Type::START):
+            // Validate information about the 'requested' transfer
+            // version is supported ?
+            // extension is suppoorted ? 
+            break;
+         case(Msg_Type::DATA):
+            // Validate tID, version, seqnum
+            // Have we received START? If not drop packet
+            // same version ?
+            // same tID ? 
+            // seqnum is within range expected ?
+            // seqnum alr received ?
+            // payload len is within correct size ?
+            break;
+         case(Msg_Type::END):
+            break;
+         default: 
+            // TODO: Handle
+            printf("ERROR: Unhandled or Unknown message type\n");
+            exit(0);
+      }
+
+      // We have some PDU 
+      // First we validate the header
+      // If we are yet to receive a START datagram then this must be a START one 
+      // If we have received a START, then: check if DATA or END
+      // If DATA: work on reconstruction
+      // If END: check if we are in a valid end state or need to timeout
+      
+      // For a DATA we need to validate: 
+      // 1. version is the same (?)
+      // 2. transfer_id 
+      // 3. expected payloads (i.e. both number and which ones we have received)
+      // 4. total number of bytes received
    }
 }
 

@@ -1,5 +1,6 @@
-CURRENT: Sender I think successfully sends everything 
-Just need to work on implementing the receiver more
+CURRENT: Left some notes in the receive file func, but need to figure out the best way for the ingress of 
+data to flow. See all the validation that needs to happen, as well as the tracking of stats. NOTE: have not 
+added much for the END portion
 
 
 TODO: Possible implementation could depend on versions. One version TransferID is just an ID and in another 

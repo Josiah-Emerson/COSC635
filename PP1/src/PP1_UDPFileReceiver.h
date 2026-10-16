@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <filesystem>
 #include <netinet/in.h>
 
@@ -30,6 +31,14 @@ class PP1_UDPFileReceiver{
       // If the return value is not a SUCCESS, path will be a nullptr 
       // TODO: May have path point to the path anyways if we want to be able to view part of it
       FileReceiveStatus receiveFile(std::filesystem::path* path);
+
+   private: 
+      // Tracking of the transmission stats
+      struct Stats{
+         std::uintmax_t totalBytes        = 0; // All the bytes received by every datagram
+         std::uintmax_t totalPayloadBytes = 0; // Total bytes not including the PDU_Header for each datagram (essentially the DATA payload + (PDU_START_Header + payload of START PDU))
+         std::uintmax_t totalDATABytes    = 0; // Total bytes for the payloads on DATA datagram (only the payload on DATA datagrams). Should be the size of the file
+      };
 
    private:
       int m_portno; // NOTE: Stored in host order not network order (i.e. convert when using for network stuff)
