@@ -26,8 +26,8 @@ int main(int argc, char* argv[]){
       return 1;
    }
    // TODO: accept command args 
-   std::string addr { "127.0.0.1" };
-   int port { 8080 };
+   std::string addr { "10.103.21.195" };
+   int port { 53317 };
 
    std::cout << "size: " << HumanReadable{std::filesystem::file_size(path)} << '\n';
    std::cout << "Filename: " << path.stem() << '\n';
