@@ -11,8 +11,10 @@ static const std::set<int> SUPPORTED_VERSIONS = {
 
 // Supported file types
 // TODO: Flag to turn this check off?
+// TODO: Add this check at sender as well
 static const std::set<std::string> SUPPORTED_FILE_TYPES = {
-   ".txt"
+   ".txt",
+   ".jpg"
 };
 
 // Types

@@ -2,11 +2,14 @@
 #include "Defs.h"
 #include "PDU.h"
 #include <cassert>
+#include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <ifaddrs.h>
@@ -69,15 +72,29 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
    // TODO: add timeout
    // block and wait for incoming files
    int numPackets = 0;
+   int numResets = 0;
+   auto timeoutStartPoint = std::chrono::steady_clock::now();
    while(1){
+      // Check timeout status; must have received [START]
+      if(m_currentTransfer && 
+            ((std::chrono::steady_clock::now() - timeoutStartPoint) > TIMEOUT_PERIOD)){
+         // TODO: handle properly
+         timeout();
+         return  FileReceiveStatus::FAIL;
+      }
+
       char buf[MAX_PDU_SIZE];
       // TODO: Do we care about srcaddr? I think not since we can use transaction ID
-      ssize_t sz = recvfrom(m_UDPSocketFD, buf, sizeof(buf), 0, NULL, NULL);
+      ssize_t sz = recvfrom(m_UDPSocketFD, buf, sizeof(buf), MSG_DONTWAIT, NULL, NULL);
       if(sz < 0){
-         // TODO handle
-         // TODO: return FAIL
-         printf("ERROR: Could not recvfrom\n");
-         exit(0);
+         if(errno == EAGAIN || errno == EWOULDBLOCK) {
+            continue;
+         }else{
+            // TODO handle
+            // TODO: return FAIL
+            printf("ERROR: Could not recvfrom\n");
+            exit(0);
+         }
       }
 
       if(sz < sizeof(PDU_Header)){
@@ -128,8 +145,7 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
                };
 
                // TODO: How we handle errors determines where the byte count increase goes
-               m_stats.totalBytes        += sz;
-               m_stats.totalPayloadBytes += conv_header.payload_len;
+               m_stats.totalBytes += sz;
 
                // Open file for writing by DATA branch
                std::string tmpFile = m_currentTransfer->filename + ".part";
@@ -140,6 +156,8 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
                   printf("ERROR: could not open file for writing\n");
                   exit(0);
                }
+
+               timeoutStartPoint = std::chrono::steady_clock::now();
                break;
             }
          case(Msg_Type::DATA):
@@ -159,14 +177,14 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
 
                // TODO: How we handle errors determines where the byte count increase goes
                m_stats.totalBytes        += sz;
-               m_stats.totalDATABytes    += conv_header.payload_len;
-               m_stats.totalPayloadBytes += conv_header.payload_len;
 
                // We have a valid DATA PDU
                // Queue for write and mark as received
                queueForWrite(buf + currIdx, conv_header.payload_len, conv_header.sequence_num);
                currIdx += conv_header.payload_len;
                m_currentTransfer->receivedDATAPDUs.insert(conv_header.sequence_num);
+
+               timeoutStartPoint = std::chrono::steady_clock::now();
                break;
             }
          case(Msg_Type::END):
@@ -186,28 +204,22 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
 
                // TODO: How we handle errors determines where the byte count increase goes
                m_stats.totalBytes        += sz;
-               m_stats.totalPayloadBytes += conv_header.payload_len; // TODO/NOTE: There probably should be a check that [END] has no payload
+               m_receivedEnd = true;
 
-               printf("Wrote %ld of %ld expected DATA PDUs\n", m_currentTransfer->writtenDATAPDUs.size(), m_currentTransfer->expectedDATAPDUs);
-               printf("Received %ldB total (including all headers), %ldB of payloads (includes [START] header) and %ldB of %ldB expected\n",
-                     m_stats.totalBytes, m_stats.totalPayloadBytes, m_stats.totalDATABytes, m_currentTransfer->expectedFilesize);
-
-               // TODO: Don't just assume file is done
-               m_ofstrm.close();
-               std::string tmpFile = m_currentTransfer->filename + ".part";
-               std::string finalFile = m_currentTransfer->filename + m_currentTransfer->extension;
-               std::filesystem::rename(tmpFile, finalFile);
-               printf("Your file is accessible at %s\n", finalFile.c_str());
-
+               timeoutStartPoint = std::chrono::steady_clock::now();
                break;
-
             }
          default: 
             // TODO: Handle
             printf("ERROR: Unhandled or Unknown message type\n");
             exit(0);
+      } // switch
+
+      if(transferComplete()){
+         finalize();
+         return FileReceiveStatus::SUCCESS;
       }
-   }
+   } // while
 }
 
 PP1_UDPFileReceiver::PDU_ValidationState PP1_UDPFileReceiver::validatePDU(const Conv_PDU_Header& header, ssize_t size){
@@ -269,39 +281,92 @@ void PP1_UDPFileReceiver::queueForWrite(const char* buf, std::size_t size, std::
    // TODO/NOTE: This function assumes we don't get repeat seqNum since the DATA branch should account for this,
    // but would be good to add a check for that too eventually
    static std::uint64_t expectedSeqNum { 1 };
+   // printf("Expected: %ld, Actual: %ld\n", expectedSeqNum, seqNum);
 
    if(seqNum == expectedSeqNum){
-      printf("Wrote %ld\n", seqNum);
+      // printf("Wrote %ld\n", seqNum);
       m_ofstrm.write(buf, size);
       m_currentTransfer->writtenDATAPDUs.insert(seqNum);
+      m_stats.bytesWritten += size;
       ++expectedSeqNum;
 
       // Check queue
-      for(const auto& e : m_writeQueue){
-         printf("In loop for seq num: %ld\n", e.first);
+      for(auto it = m_writeQueue.begin(); it != m_writeQueue.end();){
          // Should happen linearly. We should not be in a state where the first queued element 
          // is lower than the expectedSeqNum
-         if(e.first != expectedSeqNum)
+         if(it->first != expectedSeqNum){
+            ++it;
             break;
+         }
 
-         if(e.first < expectedSeqNum){ // TODO: Remove this check
+         if(it->first < expectedSeqNum){ // TODO: Remove this check
             printf("ERROR: Got ourselves into a bad queue state\n");
             exit(0);
          }
-         printf("Received and wrote queued packet #%ld\n", e.first);
-         m_ofstrm.write(e.second.first, e.second.second);
-         m_currentTransfer->writtenDATAPDUs.insert(seqNum);
-         delete[] e.second.first; // free memory
-         m_writeQueue.erase(e.first);
+         m_ofstrm.write(it->second.first, it->second.second);
+         m_currentTransfer->writtenDATAPDUs.insert(it->first);
+         m_stats.bytesWritten += it->second.second;
+         delete[] it->second.first; // free memory
+         it = m_writeQueue.erase(it); // need to set it equal to next 
          ++expectedSeqNum;
       }
       return;
    }
 
-   printf("Received [DATA] packet #%ld but expected %ld\n", seqNum, expectedSeqNum);
-
    // Not ready for this packet yet; add to queue
    char* tmpBuf = new char[size]; // dynamically allocate: need to make sure we delete it
+   memcpy(tmpBuf, buf, size);
    m_writeQueue.insert({seqNum, {tmpBuf, size}});
 }
 
+bool PP1_UDPFileReceiver::transferComplete() const {
+   return m_currentTransfer && 
+         (m_stats.bytesWritten == m_currentTransfer->expectedFilesize) &&
+         (m_currentTransfer->writtenDATAPDUs.size() == m_currentTransfer->expectedDATAPDUs) && 
+         m_receivedEnd;
+}
+
+void PP1_UDPFileReceiver::finalize(){
+   // TODO: HumanReadable
+   printf("SUCCESS: Your file was successfully downloaded.\n");
+   printf("Transmission Summary:\n");
+   printf("A total of %ldB of data was received, including headers\n", m_stats.totalBytes);
+   printf("%ldB out of %ld expected bytes were downloaded from %ld [DATA] PDUs\n", 
+         m_stats.bytesWritten, m_currentTransfer->expectedFilesize, m_currentTransfer->writtenDATAPDUs.size());
+   m_ofstrm.close();
+   std::string tmpFile = m_currentTransfer->filename + ".part";
+   std::string finalFile = m_currentTransfer->filename + m_currentTransfer->extension;
+   std::filesystem::rename(tmpFile, finalFile);
+   printf("Your file is accessible at %s\n", finalFile.c_str());
+}
+
+void PP1_UDPFileReceiver::timeout(){
+   // TODO: Document this in the README
+   // On a timeout, flush the queue and notify the user that they may not have all of the data
+   // NOTE: Special case where only the [END] is missing
+   assert(m_currentTransfer && "This function should never be called prior to receival of [START]");
+
+   // flush write queue if any
+   for(const auto& e : m_writeQueue){
+      m_ofstrm.write(e.second.first, e.second.second);
+      m_currentTransfer->writtenDATAPDUs.insert(e.first);
+      m_stats.bytesWritten += e.second.second;
+      delete[] e.second.first;
+   }
+   m_writeQueue.clear();
+   m_ofstrm.close();
+
+   printf("Transmission of the file has timed out, and some or all of your file may be missing:\n");
+   // TODO: Human readable
+   if(m_currentTransfer->writtenDATAPDUs.size() == m_currentTransfer->expectedDATAPDUs && 
+      m_stats.bytesWritten == m_currentTransfer->expectedFilesize){ // Only [END] missing
+      printf("The only PDU missing is the [END] PDU, and all bytes of data should be accounted for\n");
+   }else{
+      printf("%ldB out of the expected %ldB was downloaded from %ld out of %ld expected [DATA] PDU(s).\n",
+            m_stats.bytesWritten, m_currentTransfer->expectedFilesize, m_currentTransfer->writtenDATAPDUs.size(), m_currentTransfer->expectedDATAPDUs);
+      printf("Your file is missing %ldB from %ld [DATA] PDU(s)\n",
+            m_currentTransfer->expectedFilesize - m_stats.bytesWritten, m_currentTransfer->expectedDATAPDUs - m_currentTransfer->writtenDATAPDUs.size());
+   }
+
+   printf("The file is available at %s.part\n", m_currentTransfer->filename.c_str());
+}

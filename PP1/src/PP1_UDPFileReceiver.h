@@ -1,5 +1,6 @@
 #pragma once
 #include "PDU.h"
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -21,6 +22,9 @@ enum class FileReceiveStatus{
    FAIL,
 };
 
+// TODO: update this back to decided time
+static constexpr auto TIMEOUT_PERIOD = std::chrono::seconds(1);
+
 class PP1_UDPFileReceiver{
    public:
       PP1_UDPFileReceiver(int portno);
@@ -41,8 +45,7 @@ class PP1_UDPFileReceiver{
       // Tracking of the transmission stats
       struct Stats{
          std::uintmax_t totalBytes        = 0; // All the bytes received by every datagram
-         std::uintmax_t totalPayloadBytes = 0; // Total bytes not including the PDU_Header for each datagram (essentially the DATA payload + (PDU_START_Header + payload of START PDU))
-         std::uintmax_t totalDATABytes    = 0; // Total bytes for the payloads on DATA datagram (only the payload on DATA datagrams). Should be the size of the file
+         std::uintmax_t bytesWritten      = 0; // Number of bytes written
       };
 
       // Contains the necessary metadata to validate a packet once a START packet has been received
@@ -97,6 +100,15 @@ class PP1_UDPFileReceiver{
       // If the seq_num is the next expected number writes it immediately, 
       // Otherwise copies to the write queue
       void queueForWrite(const char* buf, std::size_t size, std::uint64_t seqNum);
+
+      // Returns true when all DATA UDPs, and END UDP has been received
+      bool transferComplete() const;
+
+      // Called when we have received all DATA UDPs and the END UDP
+      void finalize();
+
+      // Executes the timeout protocol
+      void timeout();
    private:
 
       int m_portno; // NOTE: Stored in host order not network order (i.e. convert when using for network stuff)
@@ -106,6 +118,8 @@ class PP1_UDPFileReceiver{
       Stats m_stats { };
       CurrentTransferMetadata* m_currentTransfer = nullptr; // Becomes not nullptr when a START PDU is received
                                                             // Need to make sure this memory is freed in destructor
+      bool m_receivedEnd = false;
+
       std::ofstream m_ofstrm; // writer to the file we want 
       std::map<std::uint64_t, std::pair<char*, std::size_t> > m_writeQueue; // map from seq num to data* and size
                                                                             // NOTE: any removal from the map needs to free the pointer

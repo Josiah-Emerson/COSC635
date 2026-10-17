@@ -118,6 +118,7 @@ void PP1_UDPFileSender::sendFile(){
          char* tmpBuf = new char[dBufsize];
          memcpy(tmpBuf, buf, dBufsize);
          delayBuf = tmpBuf;
+         ++conv_header.sequence_num;
          continue;
       }
       sent = sendto(m_UDPSocketFD, buf, sizeof(data_header) + data_header.payload_len, 0, (sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
@@ -128,23 +129,29 @@ void PP1_UDPFileSender::sendFile(){
       }
 
       ++conv_header.sequence_num;
+      // TODO: Remove this and headers
    }
-   // TODO: out of order below
-   sendto(m_UDPSocketFD, delayBuf, dBufsize, 0, (sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
-   delete[] delayBuf;
-   printf("Sent %ld DATA packets\n", conv_header.sequence_num - 1);
+
 
    // send END packet
    // TODO: should seq num be 0 or keep it in order from DATA packets
    conv_header.type = Msg_Type::END;
    conv_header.payload_len = 0;
    PDU_Header end_header = ConvToPDUH(conv_header);
+   // TODO: This comments otu the END transmission to simulate a timeout
    sent = sendto(m_UDPSocketFD, &end_header, sizeof(end_header), 0, (sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
    if(sent < 0){
       // TODO: Handle
       printf("ERROR: sendto\n");
       exit(0);
    }
+
+   // TODO: out of order below
+   // TODO: Uncomment below code to simulate a delayed packout timeout
+   sendto(m_UDPSocketFD, delayBuf, dBufsize, 0, (sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
+   delete[] delayBuf;
+   printf("Sent %ld DATA packets\n", conv_header.sequence_num - 1);
+
 }
 
 Conv_PDU_Header PP1_UDPFileSender::getConvHeader(Msg_Type msg_type, std::uint64_t seq_num, std::uint16_t payload_len){

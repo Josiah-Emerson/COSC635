@@ -1,4 +1,9 @@
-CURRENT: Works fine for in order. Working on out of order. Sender stops at 127 and it should be queued properly but its not quite working
+CURRENT: MAIN IMPLEMENTATION IS DONE RAHHH
+TODO: Test between laptop and PC
+TODO: Make sure we are outputting the correct stats for both send/recv
+TODO: Make output prettier
+TODO: Take command line arguments
+TODO: Test with a big file over network
 
 
 TODO: Possible implementation could depend on versions. One version TransferID is just an ID and in another 
