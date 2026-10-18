@@ -11,11 +11,11 @@ void printUsage(const char* progName){
 
 // TODO: Ensure we accept necessary bits from command line arg
 int main(int argc, char* argv[]){
-   char* ipAddr; 
+   char* ipAddr = nullptr;
    std::filesystem::path path;
-   int opt, portno;
+   int opt, portno = -1;
 
-   while((opt = getopt(argc, argv, ":hipf:")) != -1){
+   while((opt = getopt(argc, argv, ":hi:p:f:")) != -1){
       switch(opt){
          case('h'):
             printUsage(argv[0]);
