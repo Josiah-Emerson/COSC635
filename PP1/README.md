@@ -11,6 +11,7 @@ it has received all [DATA] packets, but has time out without receiving the [END]
 but it will notify the user that it has received all the data of the file.
 
 # PDU Header Format
+```
 + - - - - - + - - - - - + - - - - - + - - - - - +
 |   T&V     |                ID                 |           
 + - - - - - + - - - - - + - - - - - + - - - - - +
@@ -20,9 +21,11 @@ but it will notify the user that it has received all the data of the file.
 + - - - - - + - - - - - + - - - - - + - - - - - +
 |      PAY    LEN       |                       |           
 + - - - - - + - - - - - + - - - - - + - - - - - +
+```
 Total: 16B
 
 # PDU [START] 'Header' Format
+```
 + - - - - - + - - - - - + - - - - - + - - - - - +
 |                   FILE SIZE                   |           
 +                      (10B)                    +
@@ -34,6 +37,7 @@ Total: 16B
 +    DATA PDU Count     + - - - - - + - - - - - +
 |                       | NAME SIZE | EXT SIZE  |
 + - - - - - + - - - - - + - - - - - + - - - - - +
+```
 Total: 20B
 
 usage:
