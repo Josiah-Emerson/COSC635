@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <ifaddrs.h>
@@ -18,8 +19,9 @@
 PP1_UDPFileReceiver::PP1_UDPFileReceiver(int portno)
    : m_portno { portno }
 {
-   // TODO: handle errors
    m_UDPSocketFD = socket(AF_INET, SOCK_DGRAM, 0);
+   if(m_UDPSocketFD < 0)
+      throw std::runtime_error("Unable to create socket");
 
    memset(&m_recAddr, 0, sizeof(m_recAddr));
    m_recAddr.sin_family      = AF_INET;
@@ -27,9 +29,10 @@ PP1_UDPFileReceiver::PP1_UDPFileReceiver(int portno)
    m_recAddr.sin_addr.s_addr = INADDR_ANY;
 
    if(bind(m_UDPSocketFD, (sockaddr*)&m_recAddr, sizeof(m_recAddr)) != 0){ // ERROR
-      // TODO: Actually handle
-      printf("ERROR: Could not bind\n");
-      exit(0); // Delete the include which is for this
+      if(errno == EADDRINUSE) // The port is what was wrong
+         throw std::runtime_error("Invalid port number");
+
+      throw std::runtime_error("Could not bind to a socket");
    }
 }
 
@@ -42,14 +45,12 @@ PP1_UDPFileReceiver::~PP1_UDPFileReceiver(){
 }
 
 void PP1_UDPFileReceiver::printDestination(){
-   printf("The file receiver is currently bound to the following IPv4 addresses:\n");
 
    ifaddrs* ifaddrs;
-   if(getifaddrs(&ifaddrs) != 0){ // ERROR
-      // TODO: Actually handle
-      printf("ERROR: Could not getifaddrs\n");
-      exit(0);
+   if(getifaddrs(&ifaddrs) != 0){ 
+      throw std::runtime_error("Unable to getifaddrs");
    }
+
 
    for(struct ifaddrs* ifa = ifaddrs; ifa != NULL; ifa = ifa->ifa_next){
       if(ifa->ifa_addr == NULL) continue;
@@ -57,10 +58,8 @@ void PP1_UDPFileReceiver::printDestination(){
       if(ifa->ifa_addr->sa_family == AF_INET){
          char hbuf[NI_MAXHOST];
          if(getnameinfo(ifa->ifa_addr, sizeof(sockaddr_in), hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST) != 0){
-            // TODO: Handle 
-            // TODO: Is this an error or do we just skip?
-            printf("ERROR: Could not getnameinfo\n");
-            exit(0);
+            // TODO: Are any of the reasons getnameinfo can fail recoverable?
+            throw std::runtime_error("Unable to getnameinfo");
          }
 
          printf("%s:%d\n", hbuf, m_portno);
@@ -68,11 +67,8 @@ void PP1_UDPFileReceiver::printDestination(){
    }
 }
 
-FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
-   // TODO: add timeout
+FileReceiveStatus PP1_UDPFileReceiver::receiveFile(){
    // block and wait for incoming files
-   int numPackets = 0;
-   int numResets = 0;
    auto timeoutStartPoint = std::chrono::steady_clock::now();
    while(1){
       // Check timeout status; must have received [START]
@@ -80,26 +76,28 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
             ((std::chrono::steady_clock::now() - timeoutStartPoint) > TIMEOUT_PERIOD)){
          // TODO: handle properly
          timeout();
-         return  FileReceiveStatus::FAIL;
+         return  FileReceiveStatus::TIMEOUT;
       }
 
       char buf[MAX_PDU_SIZE];
       // TODO: Do we care about srcaddr? I think not since we can use transaction ID
       ssize_t sz = recvfrom(m_UDPSocketFD, buf, sizeof(buf), MSG_DONTWAIT, NULL, NULL);
       if(sz < 0){
-         if(errno == EAGAIN || errno == EWOULDBLOCK) {
+         // Treat failure to read for certain circumstances as essentially a dropped packet
+         if(errno == EAGAIN || errno == EWOULDBLOCK || 
+            errno == ECONNRESET || errno == ETIMEDOUT) {
+
             continue;
          }else{
-            // TODO handle
-            // TODO: return FAIL
-            printf("ERROR: Could not recvfrom\n");
-            exit(0);
+            return FileReceiveStatus::READ_FAILURE;
          }
       }
 
       if(sz < sizeof(PDU_Header)){
-         printf("ERROR: Too few bytes read\n");
-         exit(0);
+         // TODO: Could return an error but for now ignore
+         // Treat this as not one of our packets
+         fprintf(stderr, "A packet of size smaller than the PDU Header was received and dropped.\n");
+         continue;
       }
 
       std::size_t currIdx { 0 };
@@ -109,10 +107,11 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
 
       Conv_PDU_Header conv_header = PDUHtoConv(header);
       if(validatePDU(conv_header, sz) != PDU_ValidationState::VALID){
-         // TODO: handle
-         printf("ERROR: Invalid PDU state\n");
-         exit(0);
+         // TODO: Or error out? For now just notify & drop
+         fprintf(stderr, "A packet with an invalid PDU header was dropped\n");
+         continue;
       }
+
       switch(conv_header.type){
          case(Msg_Type::START):
             {
@@ -129,9 +128,8 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
                currIdx += start_header.extension_size;
 
                if(validateStartPDU(conv_start_header, std::string{extension}) != StartHeaderValidationState::VALID){
-                  // TODO: handle
-                  printf("ERROR: Invalid START PDU \n");
-                  exit(0);
+                  // Treat the loss of a [START] header as non-recoverable error
+                  return FileReceiveStatus::ILLFORMED_START;
                }
 
                // Valid: dynamically allocate and store metadata
@@ -144,17 +142,14 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
                   .extension = extension,
                };
 
-               // TODO: How we handle errors determines where the byte count increase goes
                m_stats.totalBytes += sz;
 
                // Open file for writing by DATA branch
-               std::string tmpFile = m_currentTransfer->filename + ".part";
-               m_ofstrm = std::ofstream(tmpFile, std::ios::binary);
+               m_filePath = m_currentTransfer->filename + ".part";
+               m_ofstrm = std::ofstream(m_filePath, std::ios::binary);
 
                if(!m_ofstrm){
-                  // TODO: Handle
-                  printf("ERROR: could not open file for writing\n");
-                  exit(0);
+                  return FileReceiveStatus::FILE_OPEN_ERR;
                }
 
                timeoutStartPoint = std::chrono::steady_clock::now();
@@ -163,23 +158,31 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
          case(Msg_Type::DATA):
             {
                if(!m_currentTransfer){ // No valid START has been received
-                  // TODO: Update this so that instead of erring out we just discard it and notify
-                  printf("ERROR: [DATA] PDU received, but no valid [START] PDU has been received");
-                  exit(0);
+                  // Notify user and drop packet
+                  fprintf(stderr, "[DATA] PDU received, but no valid [START] PDU has been received. Packet dropped.\n");
+                  break;
                }
 
-               if(validateDataPDU(conv_header) != Data_ValidationState::VALID){
-                  // TODO: handle
-                  // TODO: we can drop repeat seq nums 
-                  printf("ERROR: Invalid [DATA] PDU\n");
-                  exit(0);
-               }
+               if(Data_ValidationState state = validateDataPDU(conv_header); state != Data_ValidationState::VALID){
+                  switch(state){
+                     case(Data_ValidationState::INVALID_T_ID): // Not from our transfer, drop 
+                        fprintf(stderr, "[DATA] PDU received with invalid transfer ID. Packet dropped\n.");
+                        break;
+                     case(Data_ValidationState::REPEAT_SEQ_NUM):
+                        fprintf(stderr, "[DATA] PDU with repeat sequence number (#%ld) received. Packet dropped.\n", conv_header.sequence_num);
+                        break;
+                     case(Data_ValidationState::INVALID_SEQ_NUM):
+                        fprintf(stderr, "[DATA] PDU with an invalid sequence number (#%ld) received. Packet dropped.\n", conv_header.sequence_num);
+                        break;
+                     default: ;
+                  }
 
-               // TODO: How we handle errors determines where the byte count increase goes
-               m_stats.totalBytes        += sz;
+                  break; // drop packet
+               }
 
                // We have a valid DATA PDU
                // Queue for write and mark as received
+               m_stats.totalBytes        += sz;
                queueForWrite(buf + currIdx, conv_header.payload_len, conv_header.sequence_num);
                currIdx += conv_header.payload_len;
                m_currentTransfer->receivedDATAPDUs.insert(conv_header.sequence_num);
@@ -190,19 +193,16 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
          case(Msg_Type::END):
             {
                if(!m_currentTransfer){
-                  // TODO: Handle
-                  printf("ERROR: [END] PDU received, but no valid [START] PDU has been received");
-                  exit(0);
+                  fprintf(stderr, "[END] PDU received, but no valid [START] PDU has been received. Packet dropped.\n");
+                  break;
                }
 
                if(validateEndPDU(conv_header) != End_ValidationState::VALID){
-                     // TODO: handle
-                     // TODO: we can drop repeat seq nums 
-                     printf("ERROR: Invalid [END] PDU\n");
-                     exit(0);
+                  // NOTE: For now the only bad END state we check is transfer ID, in this case just drop it
+                  fprintf(stderr, "[END] PDU received with an invalid transfer ID. Packet dropped.\n");
+                  break; // drop packet
                }
 
-               // TODO: How we handle errors determines where the byte count increase goes
                m_stats.totalBytes        += sz;
                m_receivedEnd = true;
 
@@ -210,9 +210,7 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
                break;
             }
          default: 
-            // TODO: Handle
-            printf("ERROR: Unhandled or Unknown message type\n");
-            exit(0);
+            fprintf(stderr, "PDU of message type [UNKNOWN] received. Packet dropped.\n");
       } // switch
 
       if(transferComplete()){
@@ -222,9 +220,33 @@ FileReceiveStatus PP1_UDPFileReceiver::receiveFile(std::filesystem::path* path){
    } // while
 }
 
-PP1_UDPFileReceiver::PDU_ValidationState PP1_UDPFileReceiver::validatePDU(const Conv_PDU_Header& header, ssize_t size){
-   // TODO: Add outputs for each of these failpoints? 
+void PP1_UDPFileReceiver::printStats(){
+   if(!m_currentTransfer)
+      return;
+
+   // TODO HumanReadable
+   printf("Transmission Summary:\n");
+   printf("A total of %ldB of data was received, including headers\n", m_stats.totalBytes);
+   printf("%ldB were downloaded from %ld [DATA] PDUs\n", m_stats.bytesWritten, m_currentTransfer->writtenDATAPDUs.size());
+
+   // check if missing end packet
+   if(!m_receivedEnd){
+      printf("Missing %sthe [END] PDU. All other packets are accounted for.\n", 
+            m_stats.bytesWritten == m_currentTransfer->expectedFilesize ? "only " : "");
+   }
    
+   // Any outstanding bytes?
+   if(m_stats.bytesWritten != m_currentTransfer->expectedFilesize){
+      printf("Missing %ldB from %ld [DATA] PDUs\n",
+            m_currentTransfer->expectedFilesize - m_stats.bytesWritten,
+            m_currentTransfer->expectedDATAPDUs - m_currentTransfer->writtenDATAPDUs.size());
+   }
+
+   printf("This file is available at %s", m_filePath.c_str());
+}
+
+PP1_UDPFileReceiver::PDU_ValidationState PP1_UDPFileReceiver::validatePDU(const Conv_PDU_Header& header, ssize_t size){
+   // TODO: Way to log why a packet is invalid
    if(!SUPPORTED_VERSIONS.count(header.version))
       return PDU_ValidationState::UNSUPPORTED_VERSION;
 
@@ -327,17 +349,10 @@ bool PP1_UDPFileReceiver::transferComplete() const {
 }
 
 void PP1_UDPFileReceiver::finalize(){
-   // TODO: HumanReadable
-   printf("SUCCESS: Your file was successfully downloaded.\n");
-   printf("Transmission Summary:\n");
-   printf("A total of %ldB of data was received, including headers\n", m_stats.totalBytes);
-   printf("%ldB out of %ld expected bytes were downloaded from %ld [DATA] PDUs\n", 
-         m_stats.bytesWritten, m_currentTransfer->expectedFilesize, m_currentTransfer->writtenDATAPDUs.size());
    m_ofstrm.close();
    std::string tmpFile = m_currentTransfer->filename + ".part";
-   std::string finalFile = m_currentTransfer->filename + m_currentTransfer->extension;
-   std::filesystem::rename(tmpFile, finalFile);
-   printf("Your file is accessible at %s\n", finalFile.c_str());
+   m_filePath = m_currentTransfer->filename + m_currentTransfer->extension;
+   std::filesystem::rename(tmpFile, m_filePath);
 }
 
 void PP1_UDPFileReceiver::timeout(){
@@ -355,18 +370,4 @@ void PP1_UDPFileReceiver::timeout(){
    }
    m_writeQueue.clear();
    m_ofstrm.close();
-
-   printf("Transmission of the file has timed out, and some or all of your file may be missing:\n");
-   // TODO: Human readable
-   if(m_currentTransfer->writtenDATAPDUs.size() == m_currentTransfer->expectedDATAPDUs && 
-      m_stats.bytesWritten == m_currentTransfer->expectedFilesize){ // Only [END] missing
-      printf("The only PDU missing is the [END] PDU, and all bytes of data should be accounted for\n");
-   }else{
-      printf("%ldB out of the expected %ldB was downloaded from %ld out of %ld expected [DATA] PDU(s).\n",
-            m_stats.bytesWritten, m_currentTransfer->expectedFilesize, m_currentTransfer->writtenDATAPDUs.size(), m_currentTransfer->expectedDATAPDUs);
-      printf("Your file is missing %ldB from %ld [DATA] PDU(s)\n",
-            m_currentTransfer->expectedFilesize - m_stats.bytesWritten, m_currentTransfer->expectedDATAPDUs - m_currentTransfer->writtenDATAPDUs.size());
-   }
-
-   printf("The file is available at %s.part\n", m_currentTransfer->filename.c_str());
 }

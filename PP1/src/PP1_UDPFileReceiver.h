@@ -2,7 +2,6 @@
 #include "PDU.h"
 #include <chrono>
 #include <cstdint>
-#include <filesystem>
 #include <fstream>
 #include <map>
 #include <netinet/in.h>
@@ -19,7 +18,10 @@
 // For now I can only think of these too
 enum class FileReceiveStatus{
    SUCCESS,
-   FAIL,
+   TIMEOUT,          // Did not receive all packets within timeout period
+   READ_FAILURE,     // Failure in recvfrom while reading from the socket
+   ILLFORMED_START,  // [START] PDU was received, but it was ill formed
+   FILE_OPEN_ERR,    // Error opening a file to write the data to
 };
 
 // TODO: update this back to decided time
@@ -36,10 +38,12 @@ class PP1_UDPFileReceiver{
       // NOTE: This function blocks
       // It waits for a START datagram 
       // then attempts to build the file as datagrams flow in 
-      // If the return value is SUCCESS, path will contain the path to where that file is
-      // If the return value is not a SUCCESS, path will be a nullptr 
-      // TODO: May have path point to the path anyways if we want to be able to view part of it
-      FileReceiveStatus receiveFile(std::filesystem::path* path);
+      // TODO: update FileReceiveStatus enum
+      FileReceiveStatus receiveFile();
+
+      // Prints transmission stats
+      // Should only be called after receiveFile returns
+      void printStats();
 
    private: 
       // Tracking of the transmission stats
@@ -118,6 +122,7 @@ class PP1_UDPFileReceiver{
       Stats m_stats { };
       CurrentTransferMetadata* m_currentTransfer = nullptr; // Becomes not nullptr when a START PDU is received
                                                             // Need to make sure this memory is freed in destructor
+      std::string m_filePath;
       bool m_receivedEnd = false;
 
       std::ofstream m_ofstrm; // writer to the file we want 

@@ -1,38 +1,54 @@
-#include <cmath>
-#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
-#include <iostream>
+#include <getopt.h>
+#include <unistd.h>
 #include "PP1_UDPFileSender.h"
 
-struct HumanReadable{
-   std::uintmax_t size {};
 
-   private: 
-      friend std::ostream& operator<<(std::ostream& os, HumanReadable hr)
-       {
-           int o{};
-           double mantissa = hr.size;
-           for (; mantissa >= 1024.; mantissa /= 1024., ++o);
-           os << std::ceil(mantissa * 10.) / 10. << "BKMGTPE"[o];
-           return o ? os << "B (" << hr.size << ')' : os;
-       }
-};
+void printUsage(const char* progName){
+   fprintf(stderr, "Usage: %s [-i <IPv4 Address>] [-p <portno>] [-f <filename]\n", progName);
+}
 
 // TODO: Ensure we accept necessary bits from command line arg
 int main(int argc, char* argv[]){
-   std::filesystem::path path { "./resources/example.txt" };
+   char* ipAddr; 
+   std::filesystem::path path;
+   int opt, portno;
+
+   while((opt = getopt(argc, argv, ":hipf:")) != -1){
+      switch(opt){
+         case('h'):
+            printUsage(argv[0]);
+            return 0;
+         case('i'):
+            ipAddr = optarg;
+            break;
+         case('p'):
+            portno = atoi(optarg);
+            break;
+         case('f'):
+            path = optarg;
+            break;
+         case(':'):
+            fprintf(stderr, "Option -%c requires and argument\n", optopt);
+            printUsage(argv[0]);
+            return 1;
+         case('?'):
+            fprintf(stderr, "Uknown option -%c.\n", optopt);
+            printUsage(argv[0]);
+            return 1;
+         default:
+            printUsage(argv[0]);
+            return 1;
+      }
+   }
+
    if(!std::filesystem::exists(path)){
-      std::cout << "Does not exist\n";
+      fprintf(stderr, "The provided file does not exist\n");
+      printUsage(argv[0]);
       return 1;
    }
-   // TODO: accept command args 
-   std::string addr { "10.103.21.195" };
-   int port { 53317 };
 
-   std::cout << "size: " << HumanReadable{std::filesystem::file_size(path)} << '\n';
-   std::cout << "Filename: " << path.stem() << '\n';
-   std::cout << "Extension: " << path.extension() << '\n';
-
-   PP1_UDPFileSender sender { addr.c_str(), port, path};
+   PP1_UDPFileSender sender { ipAddr, portno, path };
    sender.sendFile();
 }
