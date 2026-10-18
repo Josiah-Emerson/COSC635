@@ -10,6 +10,32 @@ then the file foo.part contains the data from the packets: [1, 2, 3, 5]. Lastly,
 it has received all [DATA] packets, but has time out without receiving the [END] packet. For this case, it will still store it in foo.part,
 but it will notify the user that it has received all the data of the file.
 
+# PDU Header Format
++ - - - - - + - - - - - + - - - - - + - - - - - +
+|   T&V     |                ID                 |           
++ - - - - - + - - - - - + - - - - - + - - - - - +
+|                                               |           
++             SEQUENCE NUMBER                   +
+|                   (8B)                        |           
++ - - - - - + - - - - - + - - - - - + - - - - - +
+|      PAY    LEN       |                       |           
++ - - - - - + - - - - - + - - - - - + - - - - - +
+Total: 16B
+
+# PDU [START] 'Header' Format
++ - - - - - + - - - - - + - - - - - + - - - - - +
+|                   FILE SIZE                   |           
++                      (10B)                    +
+|                                               |           
++                       + - - - - - + - - - - - +
+|                       |                       |           
++ - - - - - + - - - - - +           (8B)        +
+|                                               |
++    DATA PDU Count     + - - - - - + - - - - - +
+|                       | NAME SIZE | EXT SIZE  |
++ - - - - - + - - - - - + - - - - - + - - - - - +
+Total: 20B
+
 usage:
 ```
 build/bin/PP1_UDPFileSender [-i <IPv4 Address>] [-p <portno>] [-f <filename>]
