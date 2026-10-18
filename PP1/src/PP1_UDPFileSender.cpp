@@ -109,25 +109,10 @@ void PP1_UDPFileSender::sendFile(){
    char buf[sizeof(PDU_Header) + MAX_PDU_PAYLOAD_SIZE];
    memset(buf, 0, sizeof(buf));
 
-   // TODO: used for delay sim
-   char *delayBuf; // Free dynamically if we use this
-   std::size_t dBufsize; // 
-
    while(istrm.read(&buf[sizeof(PDU_Header)], MAX_PDU_PAYLOAD_SIZE) || istrm.gcount() > 0){
       conv_header.payload_len = istrm.gcount(); 
       PDU_Header data_header = ConvToPDUH(conv_header);
       memcpy(buf, &data_header, sizeof(data_header));
-      // TODO: Below simulates an out of order packet
-      // NOTE: we know we have 129, so lets delay packet 127 until after. 
-      // This should mean that 128, 129 get queued and then 127 gets written followed by 128 and 129
-      if(conv_header.sequence_num == 127){
-         dBufsize = sizeof(data_header) + data_header.payload_len;
-         char* tmpBuf = new char[dBufsize];
-         memcpy(tmpBuf, buf, dBufsize);
-         delayBuf = tmpBuf;
-         ++conv_header.sequence_num;
-         continue;
-      }
       sent = sendto(m_UDPSocketFD, buf, sizeof(data_header) + data_header.payload_len, 0, (sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
       if(sent < 0){
          throw std::runtime_error("Unable to send [DATA] PDU");
@@ -152,21 +137,15 @@ void PP1_UDPFileSender::sendFile(){
 
    totalBytes += sent;
 
-   // TODO: out of order below
-   // TODO: Uncomment below code to simulate a delayed packout timeout
-   sendto(m_UDPSocketFD, delayBuf, dBufsize, 0, (sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
-   totalBytes += sent;
-   delete[] delayBuf;
-
    auto end_time = std::chrono::steady_clock::now();
 
    // print transmission stats here
    printf("File successfully sent!\n");
    printf("Transmission stats:\n\n");
-   printf("Filename: %s", m_path.filename().c_str());
-   printf("Extension: %s", m_path.extension().c_str());
-   std::cout << "Size: " << HumanReadable{std::filesystem::file_size(m_path)};
-   std::cout << "Total bytes sent (including headers): " << HumanReadable{totalBytes};
+   printf("Filename: %s\n", m_path.filename().c_str());
+   printf("Extension: %s\n", m_path.extension().c_str());
+   std::cout << "Size: " << HumanReadable{std::filesystem::file_size(m_path)} << '\n';
+   std::cout << "Total bytes sent (including headers): " << HumanReadable{totalBytes} << '\n';
    printf("Sent %ld [DATA] packets\n", conv_header.sequence_num - 1);
    std::cout << "Time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << "ms\n";
 }

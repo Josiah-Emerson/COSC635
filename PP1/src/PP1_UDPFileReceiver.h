@@ -25,7 +25,7 @@ enum class FileReceiveStatus{
 };
 
 // TODO: update this back to decided time
-static constexpr auto TIMEOUT_PERIOD = std::chrono::seconds(1);
+static constexpr auto TIMEOUT_PERIOD = std::chrono::seconds(5);
 
 class PP1_UDPFileReceiver{
    public:
