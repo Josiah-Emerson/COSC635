@@ -15,6 +15,7 @@ static const std::set<int> SUPPORTED_VERSIONS = {
 static const std::set<std::string> SUPPORTED_FILE_TYPES = {
    ".txt",
    ".jpg"
+   ".mp4"
 };
 
 // Types
