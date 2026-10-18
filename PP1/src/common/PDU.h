@@ -14,7 +14,7 @@ static const std::set<int> SUPPORTED_VERSIONS = {
 // TODO: Add this check at sender as well
 static const std::set<std::string> SUPPORTED_FILE_TYPES = {
    ".txt",
-   ".jpg"
+   ".jpg",
    ".mp4"
 };
 

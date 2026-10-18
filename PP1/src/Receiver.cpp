@@ -34,7 +34,7 @@ int main(int argc, char* argv[]){
             printf("*****************************************************************\n\n");
             break;
          default: // Unrecoverable error
-            fprintf(stderr, "[%s] An unrecoverable error was encountered during transmission:\n\n",
+            fprintf(stderr, "[%s] An unrecoverable error was encountered during transmission.\n\n",
                   status == FileReceiveStatus::READ_FAILURE ? "READ FAILURE" : 
                   status == FileReceiveStatus::ILLFORMED_START ? "ILLFORMED START" : 
                   status == FileReceiveStatus::FILE_OPEN_ERR ? "FILE OPEN ERROR" : "???");
