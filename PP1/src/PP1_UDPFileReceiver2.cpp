@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <ifaddrs.h>
 #include <netdb.h>
+#include "HumanReadable.h"
 
 PP1_UDPFileReceiver::PP1_UDPFileReceiver(int portno)
    : m_portno { portno }
@@ -224,10 +225,9 @@ void PP1_UDPFileReceiver::printStats(){
    if(!m_currentTransfer)
       return;
 
-   // TODO HumanReadable
    printf("Transmission Summary:\n");
-   printf("A total of %ldB of data was received, including headers\n", m_stats.totalBytes);
-   printf("%ldB were downloaded from %ld [DATA] PDUs\n", m_stats.bytesWritten, m_currentTransfer->writtenDATAPDUs.size());
+   std::cout << "A total of " << HumanReadable{m_stats.totalBytes} << " of data was received, including headers\n";
+   std::cout << m_stats.bytesWritten << " were downloaded from " << m_currentTransfer->writtenDATAPDUs.size() << " [DATA] PDUs\n";
 
    // check if missing end packet
    if(!m_receivedEnd){
@@ -237,9 +237,8 @@ void PP1_UDPFileReceiver::printStats(){
    
    // Any outstanding bytes?
    if(m_stats.bytesWritten != m_currentTransfer->expectedFilesize){
-      printf("Missing %ldB from %ld [DATA] PDUs\n",
-            m_currentTransfer->expectedFilesize - m_stats.bytesWritten,
-            m_currentTransfer->expectedDATAPDUs - m_currentTransfer->writtenDATAPDUs.size());
+      std::cout << "Missing " << HumanReadable{m_currentTransfer->expectedFilesize - m_stats.bytesWritten } << 
+         " from " << m_currentTransfer->expectedDATAPDUs - m_currentTransfer->writtenDATAPDUs.size() << " [DATA] PDUs\n";
    }
 
    printf("This file is available at %s", m_filePath.c_str());
